@@ -61,13 +61,13 @@ init(_Args) ->
 %% starts a connection by using the default servers. Returns 
 %% {ok, PId} if everything works. 
 start_connection() ->
-    gen_server:call(?SERVER, {start_connection, [], []}).
+   gen_server:call(?SERVER, {start_connection, [], []}, infinity).
 %% starts a connection by using a special serverlist.
-%% if serverlist is empty the default servers are used. 
+%% if serverlist is empty the default servers are used.
 start_connection(Servers) ->
-    gen_server:call(?SERVER, {start_connection, Servers, []}).
+   gen_server:call(?SERVER, {start_connection, Servers, []}, infinity).
 start_connection(Servers, MonitorPIds) ->
-    gen_server:call(?SERVER, {start_connection, Servers, MonitorPIds}).
+   gen_server:call(?SERVER, {start_connection, Servers, MonitorPIds}, infinity).
 
 %% ends the connection symbolized by the PId. Returns ok or an error message
 end_connection(ConnectionPId, Reason) ->
@@ -92,7 +92,7 @@ handle_call({start_connection, Servers, MonitorPIds}, _From, State) ->
 	    UsedServers = Servers
     end,
     ?LOG(1,"Starting"),
-    case ezk_connection:start([UsedServers, ?NUMBER_CONNECTION_TRYS]) of
+    case ezk_connection:start_link([UsedServers, ?NUMBER_CONNECTION_TRYS]) of
 	{ok, ConnectionPId} ->
 	    ?LOG(1,"Started"),
 	    Monitors = activate_usable_monitors(MonitorPIds),	   
@@ -145,6 +145,11 @@ handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State) ->
 	_Else ->
 	    {noreply, State}
     end;
+handle_info({'EXIT', ConnectionPId, _}, State) ->
+   OldConnections = State#con_man_state.connections,
+   NewConnections = lists:keydelete(ConnectionPId, 1, OldConnections),
+   NewState = State#con_man_state{connections = NewConnections},
+   {noreply, NewState};
 handle_info({tcp_closed, _Port}, State) ->
     io:format("TCP ABGEBROCHEN"),
     {stop, tcp_closed, State}.

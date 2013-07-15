@@ -121,14 +121,18 @@ interpret_reply_data(3, _Path, Reply) ->
     getbinary_2_list(Reply);
 %%% get --> Reply = The data stored in the node and then all the nodes  parameters
 interpret_reply_data(4, _Path, Reply) -> 
-    ?LOG(3,"P2M: Got a get reply"),
-    <<LengthOfData:32, Data/binary>> = Reply,
-    ?LOG(3,"P2M: Length of data is ~w",[LengthOfData]),
-    {ReplyData, Left} = split_binary(Data, LengthOfData),
-    ?LOG(3,"P2M: The Parameterdata is ~w",[Left]),    
-    ?LOG(3,"P2M: Data is ~w",[ReplyData]),    
-    Parameter = getbinary_2_list(Left),
-    {ReplyData, Parameter};
+   ?LOG(3,"P2M: Got a get reply"),
+   <<LengthOfData:32/signed-integer, Data/binary>> = Reply,
+   ?LOG(3,"P2M: Length of data is ~w",[LengthOfData]),
+   {ReplyData, Left} =
+      case LengthOfData of
+            -1 -> {<<"">>,Data};
+            _ -> split_binary(Data, LengthOfData)
+      end,
+   ?LOG(3,"P2M: The Parameterdata is ~w",[Left]),
+   ?LOG(3,"P2M: Data is ~w",[ReplyData]),
+   Parameter = getbinary_2_list(Left),
+   {ReplyData, Parameter};
 %%% set --> Reply = the nodes parameters
 interpret_reply_data(5, _Path, Reply) -> 
     getbinary_2_list(Reply);	       
@@ -161,7 +165,7 @@ interpret_reply_data(12, _Path, Reply) ->
     {<<NumberOfAnswers:32>>, Data} = split_binary(Reply, 4),
     {Children, Left} =  get_n_paths(NumberOfAnswers, Data),
     Parameter = getbinary_2_list(Left),
-    [{children, Children}|Parameter].
+    [{children, Children}, Parameter].
 
 %%----------------------------------------------------------------
 %% Little Helpers (internally neede functions)

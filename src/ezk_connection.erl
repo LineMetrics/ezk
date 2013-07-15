@@ -41,7 +41,7 @@
  	       }).
 
 %% API
--export([start/1,start_link/2]).
+-export([start/1,start_link/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -69,13 +69,15 @@
 
 -define(SERVER, ?MODULE). 
 -define(HEARTBEATTIME, 10000).
+-define(HANDSHAKE_TIMEOUT, 1000).
 
 start(Args) ->
-    ?LOG(1,"Connection: Start link called with Args: ~w",[Args]),
+    ?LOG(1,"Connection: Start called with Args: ~w",[Args]),
     gen_server:start(?MODULE, Args , []).
 
-start_link(Name, Args) ->
-    gen_server:start_link({local, Name}, ?MODULE, Args, []).
+start_link(Args) ->
+   ?LOG(1,"Connection: Start link called with Args: ~w",[Args]),
+    gen_server:start_link(?MODULE, Args, []).
 
 
 %%-------------------------------------------------------------------------------
@@ -184,7 +186,7 @@ exists(ConnectionPId, Path, WatchOwner, WatchMessage) ->
 get(ConnectionPId, Path) ->     
     gen_server:call(ConnectionPId, {command, {get, Path}}).
 n_get(ConnectionPId, Path, Receiver, Tag) ->     
-    gen_server:cast(ConnectionPId, {command, {get, Path}, Receiver, Tag}).
+    gen_server:cast(ConnectionPId, {nbcommand, {get, Path}, Receiver, Tag}).
 %% Like the one above but sets a datawatch to Path.
 %% If watch is triggered a Message M is send to the PId WatchOwner
 %% M = {WatchMessage, {Path, Type, SyncCon}
@@ -198,7 +200,7 @@ get(ConnectionPId, Path, WatchOwner, WatchMessage) ->
 get_acl(ConnectionPId, Path) ->     
     gen_server:call(ConnectionPId, {command, {get_acl, Path}}).
 n_get_acl(ConnectionPId, Path, Receiver, Tag) ->     
-    gen_server:cast(ConnectionPId, {command, {get_acl, Path}, Receiver, Tag}).
+    gen_server:cast(ConnectionPId, {nbcommand, {get_acl, Path}, Receiver, Tag}).
 
 %% Sets new Data in a Node. Old ones are lost.
 %% Dataformat is Binary.
@@ -206,7 +208,7 @@ n_get_acl(ConnectionPId, Path, Receiver, Tag) ->
 set(ConnectionPId, Path, Data) ->     
     gen_server:call(ConnectionPId, {command, {set, Path, Data}}).
 n_set(ConnectionPId, Path, Data, Receiver, Tag) ->     
-    gen_server:cast(ConnectionPId, {command, {set, Path, Data}, Receiver, Tag}).
+    gen_server:cast(ConnectionPId, {nbcommand, {set, Path, Data}, Receiver, Tag}).
 
 %% Sets new Acls in a Node. Old ones are lost.
 %% ACL like above.
@@ -214,7 +216,7 @@ n_set(ConnectionPId, Path, Data, Receiver, Tag) ->
 set_acl(ConnectionPId, Path, Acls) ->     
     gen_server:call(ConnectionPId, {command, {set_acl, Path, Acls}}).
 n_set_acl(ConnectionPId, Path, Acls, Receiver, Tag) ->     
-    gen_server:cast(ConnectionPId, {command, {set_acl, Path, Acls}, Receiver, Tag}).
+    gen_server:cast(ConnectionPId, {nbcommand, {set_acl, Path, Acls}, Receiver, Tag}).
 
 %% Lists all Children of a Node. Paths are given as Binarys!
 %% Reply = [ChildName] where ChildName = <<"Name">>
@@ -235,7 +237,7 @@ ls2(ConnectionPId, Path) ->
      
 		  gen_server:call(ConnectionPId, {command, {ls2, Path}}).
 n_ls2(ConnectionPId, Path, Receiver, Tag) ->     
-		  gen_server:cast(ConnectionPId, {command, {ls2, Path},
+		  gen_server:cast(ConnectionPId, {nbcommand, {ls2, Path},
 						  Receiver, Tag}).
 %% like above, but a Childwatch is set to the Node. 
 %% Same Reaktion like at get with watch but Type = child
@@ -292,7 +294,7 @@ init([Servers, TryTimes]) ->
     K.
 
 n_init_trys(_Servers, 0) ->
-    {error, no_server_reached};
+    {stop, no_server_reached};
 n_init_trys(Servers, N) ->
     ?LOG(1,"Connect init : incomming args: ~w",[Servers]),
     WhichServer = random:uniform(length(Servers)),
@@ -469,6 +471,7 @@ establish_connection(Ip, Port, WantedTimeout, HeartBeatTime) ->
 	{ok, Socket} ->
 	    ?LOG(3, "Connection: Socket open"),    
 	    HandshakePacket = <<0:64, WantedTimeout:64, 0:64, 16:64, 0:128>>,
+%%        <<0:32, 0:64, WantedTimeout:32, 0:64, 16:32, 0:128>>
 	    ?LOG(3, "Connection: Handshake build"),    
 	    ok = gen_tcp:send(Socket, HandshakePacket),
 	    ?LOG(3, "Connection: Handshake send"),    
@@ -476,9 +479,9 @@ establish_connection(Ip, Port, WantedTimeout, HeartBeatTime) ->
 	    ?LOG(3, "Connection: Channel set to Active"),    
 	    receive
 		{tcp,Socket,Reply} ->
-		    ?LOG(3, "Connection: Handshake Reply there"),    
-		    <<RealTimeout:64, SessionId:64, 16:32, _Hash:128>> = Reply,
-		    Watchtable    = ets:new(watchtable, [duplicate_bag, private]),
+		    ?LOG(3, "Connection: Handshake Reply there"),
+            <<_ProtoVersion:32, RealTimeout:32, SessionId:64, _Hash/binary>> = Reply,
+		    Watchtable    = ets:new(watchtable, [duplicate_bag, public]),
 		    InitialState  = #cstate{  
 		      socket = Socket, ip = Ip, 
 		      port = Port, timeout = RealTimeout,
@@ -487,12 +490,15 @@ establish_connection(Ip, Port, WantedTimeout, HeartBeatTime) ->
 		    ?LOG(3, "Connection: Initial state build"),         
 		    ok = inet:setopts(Socket,[{active,once}]),
 		    ?LOG(3, "Connection: Startup complete",[]),
-		    ?LOG(3, "Connection: Initial State : ~w",[InitialState])
-	    end,
-	    erlang:send_after(HeartBeatTime, self(), heartbeat),
-	    ?LOG(3,"Connection established with server ~s, ~w ~n",[Ip, Port]),
-	    {ok, InitialState};
-	_Else ->
+            ?LOG(3, "Connection: Initial State : ~w",[InitialState]),
+            erlang:send_after(HeartBeatTime, self(), heartbeat),
+            ?LOG(3,"Connection established with server ~s, ~w ~n",[Ip, Port]),
+            {ok, InitialState}
+        after ?HANDSHAKE_TIMEOUT ->
+            gen_tcp:close(Socket),
+            error
+        end;
+       _Else ->
 	    error
     end.
 	    
