@@ -481,7 +481,7 @@ establish_connection(Ip, Port, WantedTimeout, HeartBeatTime) ->
 		{tcp,Socket,Reply} ->
 		    ?LOG(3, "Connection: Handshake Reply there"),
             <<_ProtoVersion:32, RealTimeout:32, SessionId:64, _Hash/binary>> = Reply,
-		    Watchtable    = ets:new(watchtable, [duplicate_bag, public]),
+		    Watchtable    = ets:new(watchtable, [duplicate_bag, private]),
 		    InitialState  = #cstate{  
 		      socket = Socket, ip = Ip, 
 		      port = Port, timeout = RealTimeout,
