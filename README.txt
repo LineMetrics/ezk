@@ -1,7 +1,9 @@
 ##########################################
 Forked from infinipool
+
 Changes by LineMetrics are made mainly to make the binding work with newer versions
 of Zookeeper (Client Protocol); last version tested : 3.4.5
+
 Added several patches from other contributers also (see open Issues also)
 
 
